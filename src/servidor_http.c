@@ -10,7 +10,7 @@
 
 void send_response(int client, const char *path) {
     char fullpath[512];
-    snprintf(fullpath, sizeof(fullpath), "./%s", path[0] == '/' ? path + 1 : path);
+    snprintf(fullpath, sizeof(fullpath), "./imagens/%s", path[0] == '/' ? path + 1 : path);
 
     if (strcmp(path, "/") == 0)
         strcpy(fullpath, "./index.html");  // caso acesse sem arquivo específico
@@ -67,7 +67,7 @@ int main() {
     }
 
     listen(server_fd, 5);
-    printf("Servidor rodando em http://localhost:%d\n", PORT);
+    printf("Servidor rodando em http://localhost:%d/foto.jpg\n", PORT);
 
     while (1) {
         struct sockaddr_in client_addr;

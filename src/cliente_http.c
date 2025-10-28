@@ -15,20 +15,23 @@ void usage(const char *prog) {
 int main(int argc, char *argv[]) {
     if (argc != 2) usage(argv[0]);
 
-    char host[256], path[1024];
-    if (sscanf(argv[1], "http://%255[^/]/%1023[^\n]", host, path) < 2) {
-        fprintf(stderr, "URL inválida.\n");
+    char host[256] = "localhost"; // usamos localhost fixo
+    char path[1024];
+
+    // extrai apenas o path da URL
+    if (sscanf(argv[1], "http://%*[^/]/%1023[^\n]", path) < 1) {
+        fprintf(stderr, "URL inválida. Use http://localhost/arquivo\n");
         return 1;
     }
 
-    // Resolve hostname
+    // resolve localhost
     struct hostent *server = gethostbyname(host);
     if (!server) {
         fprintf(stderr, "Erro: host não encontrado.\n");
         return 1;
     }
 
-    // Cria socket
+    // cria socket
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("socket");
@@ -37,8 +40,8 @@ int main(int argc, char *argv[]) {
 
     struct sockaddr_in serv_addr;
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(80);
-    memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
+    serv_addr.sin_port = htons(8080); // porta do servidor local
+    memcpy(&serv_addr.sin_addr.s_addr, server->h_addr_list[0], server->h_length);
 
     if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("connect");
@@ -46,13 +49,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Envia requisição HTTP
+    // envia requisição HTTP
     char request[2048];
     snprintf(request, sizeof(request),
              "GET /%s HTTP/1.0\r\nHost: %s\r\n\r\n", path, host);
     send(sock, request, strlen(request), 0);
 
-    // Nome do arquivo de saída
+    // nome do arquivo de saída
     char *filename = strrchr(path, '/');
     filename = filename ? filename + 1 : path;
     FILE *fp = fopen(filename, "wb");
@@ -62,7 +65,7 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // Lê resposta e ignora cabeçalhos HTTP
+    // lê resposta e ignora cabeçalhos HTTP
     char buffer[BUFFER_SIZE];
     int header_end = 0;
     while (1) {
