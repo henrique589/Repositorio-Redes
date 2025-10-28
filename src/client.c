@@ -3,48 +3,86 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 
-#define SERVER_IP "127.0.0.1"
-#define SERVER_PORT 8080
-#define BUFFER_SIZE 2048
+#define BUFFER_SIZE 4096
 
-int main() {
-    int sock = 0;
+void usage(const char *prog) {
+    printf("Uso: %s http://host/arquivo\n", prog);
+    exit(1);
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) usage(argv[0]);
+
+    char host[256], path[1024];
+    if (sscanf(argv[1], "http://%255[^/]/%1023[^\n]", host, path) < 2) {
+        fprintf(stderr, "URL inválida.\n");
+        return 1;
+    }
+
+    // Resolve hostname
+    struct hostent *server = gethostbyname(host);
+    if (!server) {
+        fprintf(stderr, "Erro: host não encontrado.\n");
+        return 1;
+    }
+
+    // Cria socket
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return 1;
+    }
+
     struct sockaddr_in serv_addr;
-    char buffer[BUFFER_SIZE] = {0};
-    const char *request = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
-
-    // Cria o socket
-    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        perror("Erro ao criar socket");
-        return -1;
-    }
-
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(SERVER_PORT);
+    serv_addr.sin_port = htons(80);
+    memcpy(&serv_addr.sin_addr.s_addr, server->h_addr, server->h_length);
 
-    // Converte o endereço IP
-    if (inet_pton(AF_INET, SERVER_IP, &serv_addr.sin_addr) <= 0) {
-        printf("Endereço inválido ou não suportado\n");
-        return -1;
-    }
-
-    // Conecta ao servidor
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        perror("Erro ao conectar");
-        return -1;
+    if (connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("connect");
+        close(sock);
+        return 1;
     }
 
     // Envia requisição HTTP
+    char request[2048];
+    snprintf(request, sizeof(request),
+             "GET /%s HTTP/1.0\r\nHost: %s\r\n\r\n", path, host);
     send(sock, request, strlen(request), 0);
-    printf("Requisição enviada:\n%s\n", request);
 
-    // Recebe a resposta
-    int bytes = read(sock, buffer, BUFFER_SIZE);
-    if (bytes > 0) {
-        printf("Resposta recebida:\n%s\n", buffer);
+    // Nome do arquivo de saída
+    char *filename = strrchr(path, '/');
+    filename = filename ? filename + 1 : path;
+    FILE *fp = fopen(filename, "wb");
+    if (!fp) {
+        perror("fopen");
+        close(sock);
+        return 1;
     }
 
+    // Lê resposta e ignora cabeçalhos HTTP
+    char buffer[BUFFER_SIZE];
+    int header_end = 0;
+    while (1) {
+        int bytes = recv(sock, buffer, sizeof(buffer), 0);
+        if (bytes <= 0) break;
+
+        if (!header_end) {
+            char *body = strstr(buffer, "\r\n\r\n");
+            if (body) {
+                header_end = 1;
+                body += 4;
+                fwrite(body, 1, bytes - (body - buffer), fp);
+            }
+        } else {
+            fwrite(buffer, 1, bytes, fp);
+        }
+    }
+
+    fclose(fp);
     close(sock);
+    printf("Arquivo '%s' salvo com sucesso!\n", filename);
     return 0;
 }

@@ -3,66 +3,91 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 
+#define BUFFER_SIZE 4096
 #define PORT 8080
-#define BUFFER_SIZE 1024
+
+void send_response(int client, const char *path) {
+    char fullpath[512];
+    snprintf(fullpath, sizeof(fullpath), "./%s", path[0] == '/' ? path + 1 : path);
+
+    if (strcmp(path, "/") == 0)
+        strcpy(fullpath, "./index.html");  // caso acesse sem arquivo específico
+
+    FILE *fp = fopen(fullpath, "rb");
+    if (!fp) {
+        char *notfound = "HTTP/1.0 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h1>404 - Arquivo não encontrado</h1>";
+        send(client, notfound, strlen(notfound), 0);
+        return;
+    }
+
+    // Determina o tipo MIME básico
+    char *ext = strrchr(fullpath, '.');
+    char content_type[64] = "application/octet-stream";
+    if (ext) {
+        if (strcmp(ext, ".html") == 0) strcpy(content_type, "text/html");
+        else if (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0) strcpy(content_type, "image/jpeg");
+        else if (strcmp(ext, ".png") == 0) strcpy(content_type, "image/png");
+        else if (strcmp(ext, ".gif") == 0) strcpy(content_type, "image/gif");
+    }
+
+    // Envia cabeçalhos HTTP
+    char header[256];
+    snprintf(header, sizeof(header),
+             "HTTP/1.0 200 OK\r\nContent-Type: %s\r\n\r\n", content_type);
+    send(client, header, strlen(header), 0);
+
+    // Envia o conteúdo do arquivo
+    char buffer[BUFFER_SIZE];
+    int bytes;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+        send(client, buffer, bytes, 0);
+    }
+
+    fclose(fp);
+}
 
 int main() {
-    int server_fd, new_socket;
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
-    char buffer[BUFFER_SIZE] = {0};
-
-    // Resposta HTTP simples
-    const char *response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: 56\r\n"
-        "\r\n"
-        "<html><body><h1>Servidor HTTP em C!</h1></body></html>";
-
-    // Criação do socket TCP
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("Erro ao criar socket");
-        exit(EXIT_FAILURE);
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        perror("socket");
+        exit(1);
     }
 
-    // Configurações do endereço
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(PORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
 
-    // Associação do socket à porta
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("Erro no bind");
+    if (bind(server_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("bind");
         close(server_fd);
-        exit(EXIT_FAILURE);
+        exit(1);
     }
 
-    // Coloca o servidor em modo de escuta
-    if (listen(server_fd, 3) < 0) {
-        perror("Erro no listen");
-        exit(EXIT_FAILURE);
+    listen(server_fd, 5);
+    printf("Servidor rodando em http://localhost:%d\n", PORT);
+
+    while (1) {
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int client = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
+        if (client < 0) continue;
+
+        char buffer[BUFFER_SIZE];
+        int bytes = recv(client, buffer, sizeof(buffer) - 1, 0);
+        if (bytes > 0) {
+            buffer[bytes] = '\0';
+            char method[8], path[256];
+            sscanf(buffer, "%s %s", method, path);
+            if (strcmp(method, "GET") == 0) {
+                send_response(client, path);
+            }
+        }
+        close(client);
     }
 
-    printf("Servidor HTTP rodando na porta %d...\n", PORT);
-
-    // Aceita uma conexão
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address,
-                             (socklen_t *)&addrlen)) < 0) {
-        perror("Erro ao aceitar conexão");
-        exit(EXIT_FAILURE);
-    }
-
-    // Lê a requisição do cliente
-    read(new_socket, buffer, BUFFER_SIZE);
-    printf("Requisição recebida:\n%s\n", buffer);
-
-    // Envia a resposta HTTP
-    send(new_socket, response, strlen(response), 0);
-    printf("Resposta enviada ao cliente.\n");
-
-    close(new_socket);
     close(server_fd);
     return 0;
 }
