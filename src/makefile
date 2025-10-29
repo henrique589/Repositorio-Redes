@@ -1,12 +1,12 @@
-CC = gcc
-CFLAGS = -Wall
+CC=gcc
+CFLAGS=-Wall
 
-all: meu_navegador meu_servidor
+all: cliente servidor
 
-meu_navegador: cliente_http.c
+cliente: cliente_http.c
 	$(CC) $(CFLAGS) cliente_http.c -o meu_navegador
 
-meu_servidor: servidor_http.c
+servidor: servidor_http.c
 	$(CC) $(CFLAGS) servidor_http.c -o meu_servidor
 
 clean:
